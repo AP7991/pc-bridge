@@ -1,5 +1,7 @@
 name: Build APK
 on: [push, workflow_dispatch]
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -10,3 +12,9 @@ jobs:
       - run: chmod +x gradlew && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
         with: { name: PCBridge-apk, path: app/build/outputs/apk/debug/*.apk }
+      - name: Publish to download link
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk PCBridge.apk
+          gh release delete latest -y --cleanup-tag || true
+          gh release create latest PCBridge.apk --title "PC Bridge (latest)" --notes "Built from ${GITHUB_SHA::7}"
