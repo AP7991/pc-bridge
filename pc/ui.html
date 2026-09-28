@@ -1,0 +1,204 @@
+<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+<title>PC Bridge</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#0f1115;color:#e8e8ea;font:15px system-ui,sans-serif;height:100vh;display:flex;flex-direction:column}
+main{flex:1;overflow:auto}
+section{display:none;padding:12px}section.on{display:block}
+nav{display:flex;background:#171a21;border-top:1px solid #262a33}
+nav button{flex:1;background:none;border:0;color:#8a8f9c;padding:10px 0 12px;font-size:12px}
+nav button.on{color:#6ea8ff}
+nav b{display:block;font-size:20px;font-weight:400}
+#screen{padding:0}
+#view{position:relative;background:#000}
+#view img{width:100%;display:block;touch-action:pinch-zoom}
+.bar{display:flex;flex-wrap:wrap;gap:6px;padding:8px}
+.btn{background:#222733;color:#e8e8ea;border:1px solid #2f3542;border-radius:10px;padding:10px 12px;font-size:14px}
+.btn.on{background:#1e3a66;border-color:#3b6fc4}
+.btn.big{width:100%;padding:16px;font-size:16px;margin-bottom:10px;text-align:left}
+.btn.red{border-color:#6b2b2b}
+input,textarea{width:100%;background:#171a21;color:#e8e8ea;border:1px solid #2f3542;border-radius:10px;padding:10px;font-size:15px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.card{background:#171a21;border:1px solid #262a33;border-radius:14px;overflow:hidden}
+.card img{width:100%;aspect-ratio:16/10;object-fit:cover;background:#0b0c10;display:block}
+.card .t{padding:8px 10px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .x{float:right;color:#8a8f9c;padding:0 4px}
+.row{display:flex;align-items:center;gap:12px;padding:12px 6px;border-bottom:1px solid #1f232b}
+.row .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .s{color:#8a8f9c;font-size:12px}
+h3{margin:4px 0 12px;font-weight:500}
+#msg{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);background:#2b3040;padding:10px 16px;border-radius:20px;display:none}
+</style></head>
+<body>
+<main>
+  <section id="screen" class="on">
+    <div id="view"><img id="img" alt="PC screen"></div>
+    <div class="bar">
+      <button class="btn" id="rmode">Right-click</button>
+      <button class="btn" onclick="kb()">Keyboard</button>
+      <button class="btn" onclick="key(['enter'])">Enter</button>
+      <button class="btn" onclick="key(['backspace'])">Del</button>
+      <button class="btn" onclick="key(['esc'])">Esc</button>
+      <button class="btn" onclick="key(['win'])">Start</button>
+      <button class="btn" onclick="scrollPc(5)">Scroll up</button>
+      <button class="btn" onclick="scrollPc(-5)">Scroll down</button>
+      <button class="btn" onclick="key(['alt','tab'])">Switch</button>
+      <button class="btn" onclick="key(['ctrl','c'])">Copy</button>
+      <button class="btn" onclick="key(['ctrl','v'])">Paste</button>
+    </div>
+  </section>
+
+  <section id="apps">
+    <h3>Open on your PC</h3>
+    <div class="cards" id="cards"></div>
+  </section>
+
+  <section id="files">
+    <div class="bar" style="padding:0 0 8px">
+      <button class="btn" onclick="ls(cur.parent)" id="up">Back</button>
+      <label class="btn">Send to PC here<input type="file" id="upfile" multiple hidden></label>
+    </div>
+    <div class="s" id="path" style="color:#8a8f9c;font-size:12px;padding:0 6px 6px"></div>
+    <div id="list"></div>
+  </section>
+
+  <section id="power">
+    <h3>Power</h3>
+    <button class="btn big" onclick="pw('lock')">Lock</button>
+    <button class="btn big" onclick="pw('screenoff')">Screen off</button>
+    <button class="btn big" onclick="pw('sleep','Put PC to sleep?')">Sleep</button>
+    <button class="btn big" onclick="pw('restart','Restart PC?')">Restart</button>
+    <button class="btn big red" onclick="pw('shutdown','Shut down PC?')">Shut down</button>
+    <h3 style="margin-top:20px">Clipboard</h3>
+    <textarea id="clip" rows="4" placeholder="Text to send to PC clipboard"></textarea>
+    <div class="bar" style="padding:8px 0">
+      <button class="btn" onclick="clipGet()">Get from PC</button>
+      <button class="btn" onclick="clipSet()">Send to PC</button>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button class="on" data-s="screen"><b>&#9635;</b>Screen</button>
+  <button data-s="apps"><b>&#9707;</b>Apps</button>
+  <button data-s="files"><b>&#128193;&#xFE0E;</b>Files</button>
+  <button data-s="power"><b>&#9211;&#xFE0E;</b>Power</button>
+</nav>
+<div id="msg"></div>
+
+<script>
+const PIN = "__PIN__";
+const $ = id => document.getElementById(id);
+const api = (p, body, method) => fetch(p, body === undefined ? {} :
+  {method: method || "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})
+  .then(r => r.headers.get("content-type")?.includes("json") ? r.json() : r);
+const toast = t => { const m = $("msg"); m.textContent = t; m.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => m.style.display = "none", 2000); };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// --- tabs
+let tab = "screen";
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => show(b.dataset.s));
+function show(s) {
+  tab = s;
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.s === s));
+  document.querySelectorAll("section").forEach(x => x.classList.toggle("on", x.id === s));
+  stream(s === "screen");
+  if (s === "apps") loadApps();
+  if (s === "files" && !cur.loaded) ls("");
+}
+
+// --- live screen + touch control
+function stream(on) { $("img").src = on ? "/stream?w=" + Math.min(1920, Math.round(screen.width * devicePixelRatio * 1.5)) + "&r=" + Date.now() : ""; }
+stream(true);
+document.addEventListener("visibilitychange", () => stream(!document.hidden && tab === "screen"));
+$("img").onerror = () => setTimeout(() => tab === "screen" && stream(true), 1500);
+
+let rmode = false;
+$("rmode").onclick = () => { rmode = !rmode; $("rmode").classList.toggle("on", rmode); };
+const pos = e => { const r = $("img").getBoundingClientRect(), p = e.changedTouches ? e.changedTouches[0] : e;
+  return {x: (p.clientX - r.left) / r.width, y: (p.clientY - r.top) / r.height}; };
+
+let start = null, dragging = false, holdTimer, lastTap = 0;
+$("img").addEventListener("touchstart", e => {
+  if (e.touches.length > 1) { start = null; return; }
+  start = pos(e); dragging = false;
+  holdTimer = setTimeout(() => { dragging = true; api("/api/input", {a: "down", ...start}); navigator.vibrate?.(30); }, 450);
+}, {passive: true});
+$("img").addEventListener("touchmove", e => {
+  if (!start) return;
+  const p = pos(e);
+  if (!dragging && Math.hypot(p.x - start.x, p.y - start.y) > 0.02) { clearTimeout(holdTimer); start = null; return; }
+  if (dragging) { e.preventDefault(); api("/api/input", {a: "move", ...p}); }
+}, {passive: false});
+$("img").addEventListener("touchend", e => {
+  clearTimeout(holdTimer);
+  if (!start) return;
+  const p = pos(e);
+  if (dragging) { api("/api/input", {a: "up", ...p}); dragging = false; start = null; return; }
+  const now = Date.now(), dbl = now - lastTap < 300; lastTap = now;
+  api("/api/input", {a: rmode ? "rclick" : dbl ? "dbl" : "click", ...p});
+  if (rmode) $("rmode").click();
+  start = null;
+});
+$("img").addEventListener("click", e => { if (!("ontouchstart" in window)) api("/api/input", {a: "click", ...pos(e)}); });
+
+const key = keys => api("/api/input", {a: "key", keys});
+const scrollPc = dy => api("/api/input", {a: "scroll", dy: dy * 120});
+function kb() { const t = prompt("Type on PC:"); if (t) api("/api/input", {a: "type", text: t}); }
+
+// --- apps (open windows as cards)
+function loadApps() {
+  api("/api/windows").then(ws => {
+    $("cards").innerHTML = ws.map(w => `<div class="card" data-id="${w.id}">
+      <img loading="lazy" src="${w.min ? "" : "/api/thumb?id=" + w.id + "&r=" + Date.now()}" alt="">
+      <div class="t"><span class="x" data-close="${w.id}">&times;</span>${esc(w.title)}</div></div>`).join("")
+      || "<p>No windows open.</p>";
+  });
+}
+$("cards").onclick = e => {
+  const c = e.target.dataset.close;
+  if (c) { api("/api/close", {id: c}).then(() => setTimeout(loadApps, 500)); return; }
+  const card = e.target.closest(".card");
+  if (card) api("/api/focus", {id: card.dataset.id}).then(() => show("screen"));
+};
+
+// --- files
+let cur = {path: "", parent: null};
+const size = n => n > 1e9 ? (n/1e9).toFixed(1) + " GB" : n > 1e6 ? (n/1e6).toFixed(1) + " MB" : n > 1e3 ? Math.round(n/1e3) + " KB" : n + " B";
+function ls(path) {
+  if (path === null) return;
+  api("/api/ls?path=" + encodeURIComponent(path)).then(d => {
+    if (d.error) return toast(d.error);
+    cur = {...d, loaded: true};
+    $("up").style.visibility = d.parent === null ? "hidden" : "visible";
+    $("path").textContent = d.path || "This PC";
+    $("list").innerHTML = d.items.map((f, i) => `<div class="row" data-i="${i}">
+      <span>${f.dir ? "&#128193;&#xFE0E;" : "&#128196;&#xFE0E;"}</span><span class="n">${esc(f.name)}</span>
+      <span class="s">${f.dir ? "" : size(f.size)}</span></div>`).join("") || "<p>Empty folder.</p>";
+  });
+}
+$("list").onclick = e => {
+  const row = e.target.closest(".row"); if (!row) return;
+  const f = cur.items[row.dataset.i];
+  if (f.dir) return ls(f.path);
+  if (confirm(`Save "${f.name}" to phone?\n(Cancel = open it on the PC)`))
+    location.href = "/api/dl?t=" + PIN + "&path=" + encodeURIComponent(f.path);
+  else api("/api/open", {path: f.path}).then(() => toast("Opened on PC"));
+};
+$("upfile").onchange = async e => {
+  for (const f of e.target.files) {
+    toast("Sending " + f.name + "...");
+    await fetch("/api/up?dir=" + encodeURIComponent(cur.path) + "&name=" + encodeURIComponent(f.name), {method: "PUT", body: f});
+  }
+  toast("Sent to PC"); e.target.value = ""; ls(cur.path);
+};
+
+// --- power + clipboard
+function pw(a, ask) { if (!ask || confirm(ask)) api("/api/power", {a}).then(() => toast("Done")); }
+function clipGet() { api("/api/clip").then(d => { $("clip").value = d.text || ""; toast("Got PC clipboard"); }); }
+function clipSet() { api("/api/clip", {text: $("clip").value}).then(() => toast("Sent to PC clipboard")); }
+</script>
+</body></html>

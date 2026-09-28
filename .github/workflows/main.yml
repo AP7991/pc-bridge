@@ -1,20 +1,36 @@
-name: Build APK
+name: Build APK + PC app
 on: [push, workflow_dispatch]
 permissions:
   contents: write
 jobs:
-  build:
+  apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
-      - run: chmod +x gradlew && ./gradlew assembleDebug
+      - run: chmod +x gradlew && ./gradlew assembleDebug && cp app/build/outputs/apk/debug/app-debug.apk PCBridge.apk
       - uses: actions/upload-artifact@v4
-        with: { name: PCBridge-apk, path: app/build/outputs/apk/debug/*.apk }
-      - name: Publish to download link
-        env: { GH_TOKEN: "${{ github.token }}" }
+        with: { name: apk, path: PCBridge.apk }
+
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyinstaller mss pillow pyautogui pygetwindow
+      - run: pyinstaller --onefile --noconsole --uac-admin --name PCBridge --add-data "pc/ui.html;." pc/pcbridge.py
+      - uses: actions/upload-artifact@v4
+        with: { name: exe, path: dist/PCBridge.exe }
+
+  publish:
+    needs: [apk, exe]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { merge-multiple: true }
+      - env: { GH_TOKEN: "${{ github.token }}", GH_REPO: "${{ github.repository }}" }
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk PCBridge.apk
           gh release delete latest -y --cleanup-tag || true
-          gh release create latest PCBridge.apk --title "PC Bridge (latest)" --notes "Built from ${GITHUB_SHA::7}"
+          gh release create latest PCBridge.apk PCBridge.exe --title "PC Bridge (latest)" --notes "Built from ${GITHUB_SHA::7}"
